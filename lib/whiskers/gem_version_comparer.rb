@@ -1,77 +1,78 @@
 require 'fileutils'
 require 'open-uri'
 require 'rubygems/package'
+require 'tmpdir'
 
 module Whiskers
   class GemVersionComparer
-    TMP_DIR = '/tmp/gem_diffs'
+    TMP_DIR = '/tmp/gems'
 
-    def initialize(gem_name, version1, version2)
-      @dep1 = Dependency.new(gem_name, version1)
-      @dep2 = Dependency.new(gem_name, version2)
-      @base_dir1 = File.join(TMP_DIR, "#{gem_name}-#{version1}")
-      @base_dir2 = File.join(TMP_DIR, "#{gem_name}-#{version2}")
+    def initialize(gem_name, old_version, new_version)
+      @gem_name = gem_name
+      @old_version = old_version
+      @new_version = new_version
+      FileUtils.mkdir_p(TMP_DIR)
+      download_and_extract_gems
     end
 
-    def compare
-      setup_directories
-      download_and_extract_gems
-      diff_files
+    def old_dir
+      base_dir(@old_version)
+    end
+
+    def new_dir
+      base_dir(@new_version)
     end
 
     def base_dir(version)
-      version == @dep1.version ? @base_dir1 : @base_dir2
+      output_dir = File.join(TMP_DIR, "#{@gem_name}-#{version}")
+      if Dir.exist?(output_dir)
+        output_dir
+      else
+        raise "Gem directory not found: #{output_dir}"
+      end
     end
 
     private
 
-    def setup_directories
-      FileUtils.mkdir_p(TMP_DIR)
-      FileUtils.mkdir_p(@base_dir1)
-      FileUtils.mkdir_p(@base_dir2)
-    end
-
     def download_and_extract_gems
-      download_and_extract(@dep1, @base_dir1)
-      download_and_extract(@dep2, @base_dir2)
+      [@old_version, @new_version].each do |version|
+        gem_path = download_gem(version)
+        extract_gem(gem_path, version)
+      end
     end
 
-    def download_and_extract(dependency, target_dir)
-      gem_path = File.join(TMP_DIR, "#{dependency.name}-#{dependency.version}.gem")
+    def download_gem(version)
+      gem_file = "#{@gem_name}-#{version}.gem"
+      gem_path = File.join(TMP_DIR, gem_file)
       
       unless File.exist?(gem_path)
-        URI.open(dependency.gem_download_url) do |remote_file|
-          File.binwrite(gem_path, remote_file.read)
-        end
+        uri = URI.parse("https://rubygems.org/downloads/#{gem_file}")
+        File.write(gem_path, uri.read)
       end
-
-      if Dir.empty?(target_dir)
-        Gem::Package.new(gem_path).extract_files(target_dir)
-      end
+      
+      gem_path
     end
 
-    def diff_files
-      dir1_files = collect_files(@base_dir1)
-      dir2_files = collect_files(@base_dir2)
+    def extract_gem(gem_path, version)
+      output_dir = File.join(TMP_DIR, "#{@gem_name}-#{version}")
+      return if Dir.exist?(output_dir) && !Dir.empty?(output_dir)
 
-      {
-        added: dir2_files - dir1_files,
-        removed: dir1_files - dir2_files,
-        modified: find_modified_files(dir1_files & dir2_files)
-      }
-    end
+      FileUtils.rm_rf(output_dir)
+      FileUtils.mkdir_p(output_dir)
+      
+      # First, extract the gem file
+      temp_dir = File.join(TMP_DIR, "temp_#{@gem_name}-#{version}")
+      FileUtils.rm_rf(temp_dir)
+      FileUtils.mkdir_p(temp_dir)
+      system("tar", "xzf", gem_path, "-C", temp_dir)
 
-    def collect_files(dir)
-      Dir.glob("#{dir}/**/*", File::FNM_DOTMATCH)
-         .reject { |f| File.directory?(f) }
-         .map { |f| f.sub("#{dir}/", '') }
-    end
-
-    def find_modified_files(common_files)
-      common_files.select do |file|
-        path1 = File.join(@base_dir1, file)
-        path2 = File.join(@base_dir2, file)
-        FileUtils.compare_file(path1, path2) == false
+      # Then extract data.tar.gz to the final location
+      data_tar = File.join(temp_dir, "data.tar.gz")
+      if File.exist?(data_tar)
+        system("tar", "xzf", data_tar, "-C", output_dir)
+        FileUtils.rm_rf(temp_dir)
+      else
+        FileUtils.mv(temp_dir, output_dir)
       end
     end
   end
