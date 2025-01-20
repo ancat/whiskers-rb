@@ -1,0 +1,70 @@
+rules:
+  - id: ruby-sensitive-file-read
+    patterns:
+      - pattern-either:
+          - pattern-regex: 'File\.read\(".*\.(env|pem|key|crt|cer)$|.*/(\.ssh|\.aws|\.config)/|.*password|.*secret|.*credentials.*"\)'
+          - pattern-regex: 'File\.readlines\(".*\.(env|pem|key|crt|cer)$|.*/(\.ssh|\.aws|\.config)/|.*password|.*secret|.*credentials.*"\)'
+          - pattern-regex: 'IO\.read\(".*\.(env|pem|key|crt|cer)$|.*/(\.ssh|\.aws|\.config)/|.*password|.*secret|.*credentials.*"\)'
+          - pattern-regex: 'IO\.readlines\(".*\.(env|pem|key|crt|cer)$|.*/(\.ssh|\.aws|\.config)/|.*password|.*secret|.*credentials.*"\)'
+          - pattern-regex: 'File\.open\(".*\.(env|pem|key|crt|cer)$|.*/(\.ssh|\.aws|\.config)/|.*password|.*secret|.*credentials.*",\s*"r"\)'
+    message: "Reading potentially sensitive files"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+
+  - id: ruby-system-info-access
+    patterns:
+      - pattern-either:
+          # - pattern: ENV["..."]
+          # - pattern: ENV.fetch("...", ...)
+          - pattern: "`hostname`"
+          - pattern: "`whoami`"
+          - pattern: "`id`"
+          - pattern: Socket.gethostname
+          - pattern: Process.uid
+          - pattern: Process.gid
+          - pattern: Dir.home
+          - pattern: File.expand_path("~")
+          - pattern: Etc.getlogin
+    message: "Accessing system or environment information"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: MEDIUM
+      likelihood: MEDIUM
+
+  - id: ruby-hardcoded-base64
+    patterns:
+      - pattern-regex: '[A-Za-z0-9+/]{50,}={0,2}'
+    message: "Detected hardcoded Base64 data - potential obfuscated payload"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+
+  - id: ruby-base64-usage
+    patterns:
+      - pattern-either:
+          - pattern: Base64.encode64(...)
+          - pattern: Base64.strict_encode64(...)
+          - pattern: Base64.urlsafe_encode64(...)
+          - pattern: Base64.decode64(...)
+          - pattern: Base64.strict_decode64(...)
+          - pattern: Base64.urlsafe_decode64(...)
+    message: "Base64 encoding/decoding detected - potential data obfuscation"
+    languages: [ruby]
+    severity: INFO
+    metadata:
+      category: security
+      confidence: LOW
+      impact: MEDIUM
+      likelihood: LOW 

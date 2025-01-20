@@ -1,0 +1,61 @@
+rules:
+  - id: ruby-hardcoded-urls
+    patterns:
+      - pattern-either:
+          - pattern: "http://$URL"
+          - pattern: "https://$URL"
+          - pattern: "ftp://$URL"
+          - pattern: "sftp://$URL"
+          - pattern: "ws://$URL"
+          - pattern: "wss://$URL"
+    message: "Hardcoded URL detected - potential security risk for remote payload downloads"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      references:
+        - https://owasp.org/www-project-top-ten/2017/A9_2017-Using_Components_with_Known_Vulnerabilities
+
+  - id: ruby-hardcoded-ip-addresses
+    patterns:
+      - pattern-regex: '\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+    message: "Hardcoded IP address detected - potential security risk for remote connections"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+
+  - id: ruby-suspicious-download-patterns
+    patterns:
+      - pattern-either:
+          - pattern: |
+              Net::HTTP.get($URL, ...)
+          - pattern: |
+              URI.open($URL, ...)
+          - pattern: |
+              OpenURI.open_uri($URL, ...)
+          - pattern: |
+              Kernel.open($URL, ...)
+          - pattern: |
+              open($URL, ...)
+          - pattern: |
+              wget $URL
+          - pattern: |
+              curl $URL
+    message: "Suspicious download pattern detected - potential remote code download"
+    languages: [ruby]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      references:
+        - https://ruby-doc.org/stdlib-2.7.0/libdoc/net/http/rdoc/Net/HTTP.html
+        - https://ruby-doc.org/stdlib-2.7.0/libdoc/open-uri/rdoc/OpenURI.html 

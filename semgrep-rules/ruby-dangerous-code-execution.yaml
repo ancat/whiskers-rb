@@ -1,0 +1,37 @@
+rules:
+  - id: ruby-eval-usage
+    pattern: eval(...)
+    message: "Dangerous eval() detected - could allow arbitrary code execution"
+    languages: [ruby]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: HIGH
+      references:
+        - https://owasp.org/www-community/attacks/Code_Injection
+
+  - id: ruby-system-command-execution
+    patterns:
+      - pattern-either:
+          - pattern: system(...)
+          - pattern: exec(...)
+          - pattern: "`...`"
+          - pattern: "%x[...]"
+          - pattern: "%x{...}"
+          - pattern: Open3.capture2(...)
+          - pattern: Open3.capture3(...)
+          - pattern: Open3.popen2(...)
+          - pattern: Open3.popen3(...)
+    message: "Dangerous shell command execution detected"
+    languages: [ruby]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      references:
+        - https://ruby-doc.org/core/Kernel.html#method-i-system
+        - https://ruby-doc.org/core/Kernel.html#method-i-exec 
