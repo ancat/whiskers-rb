@@ -1,3 +1,5 @@
+require 'optparse'
+
 module Whiskers
   class CLI
     def self.run(args)
@@ -9,24 +11,64 @@ module Whiskers
     end
 
     def run
-      validate_args
-      differences = compare_versions
+      options = parse_options
+      differences = compare_versions(options)
       display_differences(differences)
-      scan_changes(differences) unless differences.values.all?(&:empty?)
+      scan_changes(differences, options) unless differences.values.all?(&:empty?)
     end
 
     private
 
-    def validate_args
-      unless @args.length == 3
-        puts "Usage: gem_diff GEM_NAME VERSION1 VERSION2"
+    def parse_options
+      options = {}
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: whiskers [options]"
+
+        opts.separator ""
+        opts.separator "Options:"
+
+        opts.on("-h", "--help", "Show this help message") do
+          puts opts
+          exit
+        end
+
+        opts.on("-v", "--version", "Show version") do
+          puts Whiskers::VERSION
+          exit
+        end
+
+        opts.on("--gem NAME", "Name of the gem to compare") do |name|
+          options[:gem_name] = name
+        end
+
+        opts.on("--old VERSION", "Old version of the gem") do |version|
+          options[:old_version] = version
+        end
+
+        opts.on("--new VERSION", "New version of the gem") do |version|
+          options[:new_version] = version
+        end
+      end
+
+      begin
+        parser.parse!(@args)
+      rescue OptionParser::InvalidOption => e
+        puts "Error: #{e.message}"
+        puts parser
         exit 1
       end
+
+      unless options[:gem_name] && options[:old_version] && options[:new_version]
+        puts "Error: --gem, --old, and --new are all required"
+        puts parser
+        exit 1
+      end
+
+      options
     end
 
-    def compare_versions
-      gem_name, version1, version2 = @args
-      comparer = GemVersionComparer.new(gem_name, version1, version2)
+    def compare_versions(options)
+      comparer = GemVersionComparer.new(options[:gem_name], options[:old_version], options[:new_version])
       comparer.compare
     rescue OpenURI::HTTPError => e
       puts "Error downloading gem: #{e.message}"
@@ -56,18 +98,19 @@ module Whiskers
         puts "No differences found between versions"
       else
         changed_files = (differences[:added] + differences[:modified]).sort.join(',')
+        puts "\nChanged files (comma-delimited):"
+        puts changed_files
       end
     end
 
-    def scan_changes(differences)
+    def scan_changes(differences, options)
       puts "\nRunning Semgrep security scan on changed files..."
-      gem_name, version1, version2 = @args
-      comparer = GemVersionComparer.new(gem_name, version1, version2)
+      comparer = GemVersionComparer.new(options[:gem_name], options[:old_version], options[:new_version])
       
       # Get all files to scan in both versions
-      old_files = differences[:modified].map { |f| File.join(comparer.base_dir(version1), f) }
-      new_files = differences[:modified].map { |f| File.join(comparer.base_dir(version2), f) } + 
-                  differences[:added].map { |f| File.join(comparer.base_dir(version2), f) }
+      old_files = differences[:modified].map { |f| File.join(comparer.base_dir(options[:old_version]), f) }
+      new_files = differences[:modified].map { |f| File.join(comparer.base_dir(options[:new_version]), f) } +
+                  differences[:added].map { |f| File.join(comparer.base_dir(options[:new_version]), f) }
 
       runner = Semgrep::Runner.new
       
@@ -82,11 +125,7 @@ module Whiskers
 
       # Group and display findings
       findings_by_file = added_findings.group_by do |finding|
-        finding.relative_path(comparer.base_dir(version2))
-      end
-
-      if findings_by_file.empty?
-        puts "No new security issues found in changed files."
+        finding.relative_path(comparer.base_dir(options[:new_version]))
       end
 
       findings_by_file.each do |file, findings|
