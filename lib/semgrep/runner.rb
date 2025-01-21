@@ -21,6 +21,7 @@ module Semgrep
         results = JSON.parse(stdout)["results"] rescue []
         results.map { |r| Finding.new(r) }
       else
+        puts "out #{stdout}"
         puts "Error running Semgrep: #{stderr}"
         []
       end
