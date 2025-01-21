@@ -7,9 +7,14 @@ module Whiskers
 
       def run
         options = parse_options
-        differences = compare_versions(options[:gem_name], options[:old_version], options[:new_version])
+        
+        # Download and extract both versions
+        old_dir = GemUtils.download_and_extract(options[:gem_name], options[:old_version])
+        new_dir = GemUtils.download_and_extract(options[:gem_name], options[:new_version])
+        
+        differences = compare_versions(old_dir, new_dir)
         display_differences(differences)
-        scan_changes(differences, options) unless differences.values.all?(&:empty?)
+        scan_changes(differences, old_dir, new_dir) unless differences.values.all?(&:empty?)
       end
 
       private
@@ -57,12 +62,8 @@ module Whiskers
         options
       end
 
-      def compare_versions(gem_name, old_version, new_version)
-        comparer = GemVersionComparer.new(gem_name, old_version, new_version)
-        Semgrep::DirectoryDiffer.diff(comparer.old_dir, comparer.new_dir)
-      rescue OpenURI::HTTPError => e
-        puts "Error downloading gem: #{e.message}"
-        exit 1
+      def compare_versions(old_dir, new_dir)
+        Semgrep::DirectoryDiffer.diff(old_dir, new_dir)
       rescue => e
         puts "Error: #{e.message}"
         exit 1
@@ -93,24 +94,32 @@ module Whiskers
         end
       end
 
-      def scan_changes(differences, options)
+      def scan_changes(differences, old_dir, new_dir)
+        return if differences[:modified].empty? && differences[:added].empty?
+
         puts "\nRunning Semgrep security scan on changed files..."
-        comparer = GemVersionComparer.new(options[:gem_name], options[:old_version], options[:new_version])
-        
-        old_files = differences[:modified].map { |f| File.join(comparer.base_dir(options[:old_version]), f) }
-        new_files = differences[:modified].map { |f| File.join(comparer.base_dir(options[:new_version]), f) } + 
-                    differences[:added].map { |f| File.join(comparer.base_dir(options[:new_version]), f) }
         runner = Semgrep::Runner.new
         
-        old_findings = runner.scan(old_files)
+        # Only scan modified files in both versions
+        if differences[:modified].any?
+          old_files = differences[:modified].map { |f| File.join(old_dir, f) }
+          old_findings = runner.scan(old_files)
+        else
+          old_findings = []
+        end
+
+        # Scan both modified and added files in new version
+        new_files = (differences[:modified] + differences[:added]).map { |f| File.join(new_dir, f) }
         new_findings = runner.scan(new_files)
 
+        # Find new issues that weren't in the old version
         added_findings = new_findings.reject do |new_finding|
           old_findings.any? { |old_finding| new_finding == old_finding }
         end
 
+        # Group and display findings
         findings_by_file = added_findings.group_by do |finding|
-          finding.relative_path(comparer.base_dir(options[:new_version]))
+          finding.relative_path(new_dir)
         end
 
         findings_by_file.each do |file, findings|

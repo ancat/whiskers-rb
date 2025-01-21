@@ -7,6 +7,7 @@ module Whiskers
 
       def run
         options = parse_options
+        input_file = options[:input]
         # TODO: Implement bulk gem diff functionality
         puts "Bulk gem diff not yet implemented"
       end
