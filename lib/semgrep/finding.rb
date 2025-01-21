@@ -21,6 +21,12 @@ module Semgrep
       ].join("\n")
     end
 
+    def rebase!(base_dir)
+      raise "Base doesn't match" unless @path.start_with? base_dir
+
+      @path = @path.sub("#{base_dir}/", '')
+    end
+
     def relative_path(base_dir)
       path.sub("#{base_dir}/", '')
     end
