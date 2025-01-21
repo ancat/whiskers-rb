@@ -1,0 +1,60 @@
+name: Gemfile.lock Change Detection
+
+on:
+  push:
+    paths:
+      - '**/Gemfile.lock'
+  pull_request:
+    paths:
+      - '**/Gemfile.lock'
+
+jobs:
+  analyze-gemfile-lock:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: 3.0 # or your preferred version of Ruby
+
+    - name: Install semgrep 1.55.0
+      run: |
+        curl -sSfL https://github.com/returntocorp/semgrep/releases/download/v1.55.0/semgrep-linux-amd64-v1.55.0.tgz | tar xz
+        sudo mv semgrep-linux-amd64-v1.55.0/semgrep /usr/local/bin/semgrep
+
+    - name: Make directory for old and new Gemfile.lock
+      run: |
+        mkdir -p /tmp/Gemfile
+
+    - name: Copy the original Gemfile.lock
+      run: |
+        cp $(git show HEAD~1:Gemfile.lock) /tmp/Gemfile.lock.old || echo "No previous Gemfile.lock found"
+
+    - name: Copy the modified Gemfile.lock
+      run: |
+        cp Gemfile.lock /tmp/Gemfile.lock.new
+
+    - name: Clone the whiskers repository
+      run: |
+        git clone https://github.com/ancat/whiskers.git /tmp/whiskers
+
+    - name: Run lockfile_diff and gem_diff_bulk
+      run: |
+        cd /tmp/whiskers
+        bin/whiskers lockfile_diff --json --old /tmp/Gemfile.lock.old --new /tmp/Gemfile.lock.new > /tmp/gemfile_changes.json
+        bin/whiskers gem_diff_bulk --input /tmp/gemfile_changes.json > /tmp/gemfile_diff_output.txt
+
+    - name: Comment on the pull request with the output
+      uses: peter-evans/comment@v2
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        body: |
+          ## Gemfile.lock Changes
+          The following changes were detected in the Gemfile.lock:
+          
+          ```txt
+          $(cat /tmp/gemfile_diff_output.txt)
+          ```
