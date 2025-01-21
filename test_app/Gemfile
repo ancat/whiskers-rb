@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "iptoasn"
+gem "parallel", "~> 1.24"
+gem "ddtrace"
+gem 'jbuilder', '~> 2.0'
