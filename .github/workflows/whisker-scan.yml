@@ -8,34 +8,39 @@ on:
     paths:
       - '**/Gemfile.lock'
 
+permissions:
+  contents: write
+
 jobs:
   analyze-gemfile-lock:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch the entire history to resolve PR changes
 
     - name: Set up Ruby
       uses: ruby/setup-ruby@v1
       with:
-        ruby-version: 3.0 # or your preferred version of Ruby
+        ruby-version: '3.1'
 
-    - name: Install semgrep 1.55.0
+    - name: Install semgrep via pip
       run: |
-        curl -sSfL https://github.com/returntocorp/semgrep/releases/download/v1.55.0/semgrep-linux-amd64-v1.55.0.tgz | tar xz
-        sudo mv semgrep-linux-amd64-v1.55.0/semgrep /usr/local/bin/semgrep
+        python -m pip install --upgrade pip
+        pip install semgrep==1.55.0
 
     - name: Make directory for old and new Gemfile.lock
       run: |
         mkdir -p /tmp/Gemfile
 
-    - name: Copy the original Gemfile.lock
+    - name: Identify and copy the old and new Gemfile.lock
       run: |
-        cp $(git show HEAD~1:Gemfile.lock) /tmp/Gemfile.lock.old || echo "No previous Gemfile.lock found"
-
-    - name: Copy the modified Gemfile.lock
-      run: |
-        cp Gemfile.lock /tmp/Gemfile.lock.new
+        cp test_app/Gemfile.lock /tmp/Gemfile.lock.new
+        git checkout "$BASE_SHA"
+        cp test_app/Gemfile.lock /tmp/Gemfile.lock.old
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
     - name: Clone the whiskers repository
       run: |
@@ -47,14 +52,12 @@ jobs:
         bin/whiskers lockfile_diff --json --old /tmp/Gemfile.lock.old --new /tmp/Gemfile.lock.new > /tmp/gemfile_changes.json
         bin/whiskers gem_diff_bulk --input /tmp/gemfile_changes.json > /tmp/gemfile_diff_output.txt
 
-    - name: Comment on the pull request with the output
-      uses: peter-evans/comment@v2
-      with:
-        issue-number: ${{ github.event.pull_request.number }}
-        body: |
-          ## Gemfile.lock Changes
-          The following changes were detected in the Gemfile.lock:
-          
-          ```txt
-          $(cat /tmp/gemfile_diff_output.txt)
-          ```
+    - name: Create Comment
+      run: |
+        # Use GitHub API to create a comment on the PR
+        PR_NUMBER=${{ github.event.pull_request.number }}
+        COMMENT='```'"$(cat /tmp/gemfile_changes.json)"'```'
+        GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+        COMMENT_URL="https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+
+        curl -s -H "Authorization: token ${GITHUB_TOKEN}" -X POST $COMMENT_URL -d "{\"body\":\"$COMMENT\"}"
