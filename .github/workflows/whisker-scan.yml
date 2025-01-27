@@ -1,63 +1,59 @@
-name: Gemfile.lock Change Detection
-
+name: Scan Gemfile Changes
 on:
-  push:
-    paths:
-      - '**/Gemfile.lock'
   pull_request:
     paths:
       - '**/Gemfile.lock'
 
-permissions:
-  contents: write
-
 jobs:
-  analyze-gemfile-lock:
+  scan-gemfiles:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0  # Fetch the entire history to resolve PR changes
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Ruby
-      uses: ruby/setup-ruby@v1
-      with:
-        ruby-version: '3.1'
+      - name: Create directories
+        run: |
+          mkdir -p /tmp/old-gemfiles
+          mkdir -p /tmp/new-gemfiles
 
-    - name: Install semgrep via pip
-      run: |
-        python -m pip install --upgrade pip
-        pip install semgrep==1.55.0
+      - name: Download whiskers
+        run: |
+          curl -L -o /tmp/whiskers https://github.com/ancat/whiskers/releases/download/v0/whiskers.linux.amd64
+          chmod +x /tmp/whiskers
 
-    - name: Make directory for old and new Gemfile.lock
-      run: |
-        mkdir -p /tmp/Gemfile
+      - name: Get changed Gemfile.locks
+        id: changed-files
+        run: |
+          echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep 'Gemfile.lock' | tr '\n' ' ')" >> $GITHUB_OUTPUT
 
-    - name: Identify and copy the old and new Gemfile.lock
-      run: |
-        cp test_app/Gemfile.lock /tmp/Gemfile.lock.new
-        git checkout "$BASE_SHA"
-        cp test_app/Gemfile.lock /tmp/Gemfile.lock.old
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      - name: Process Gemfile changes
+        run: |
+          for file in ${{ steps.changed-files.outputs.files }}; do
+            dir=$(dirname "$file")
+            base=$(basename "$file")
+            
+            # Get old version from base branch
+            git show ${{ github.event.pull_request.base.sha }}:"$file" > "/tmp/old-gemfiles/${dir//\//_}_$base"
+            
+            # Get new version from current branch
+            cp "$file" "/tmp/new-gemfiles/${dir//\//_}_$base"
+          done
 
-    - name: Clone the whiskers repository
-      run: |
-        git clone https://github.com/ancat/whiskers.git /tmp/whiskers
+      - name: Scan Gemfile changes
+        run: |
+          for old in /tmp/old-gemfiles/*; do
+            new="/tmp/new-gemfiles/$(basename "$old")"
+            if [ -f "$new" ]; then
+              echo "Scanning changes in $(basename "$old")..."
+              /tmp/whiskers gemfile-diff "$old" "$new" -o /tmp/diff.json
+              /tmp/whiskers gemfile-diff-scan /tmp/diff.json > /tmp/scan_results.txt
+              
+              if [ -s /tmp/scan_results.txt ]; then
+                gh pr comment ${{ github.event.pull_request.number }} --body "$(echo 'Whiskers scan results for '$(basename "$old")':\n```\n'$(cat /tmp/scan_results.txt)'\n```')"
+              fi
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Run lockfile_diff and gem_diff_bulk
-      run: |
-        cd /tmp/whiskers
-        bin/whiskers lockfile_diff --json --old /tmp/Gemfile.lock.old --new /tmp/Gemfile.lock.new > /tmp/gemfile_changes.json
-        bin/whiskers gem_diff_bulk --input /tmp/gemfile_changes.json > /tmp/gemfile_diff_output.txt
-
-    - name: Create Comment
-      run: |
-        # Use GitHub API to create a comment on the PR
-        PR_NUMBER=${{ github.event.pull_request.number }}
-        COMMENT='```'"$(cat /tmp/gemfile_changes.json)"'```'
-        GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-        COMMENT_URL="https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-
-        curl -s -H "Authorization: token ${GITHUB_TOKEN}" -X POST $COMMENT_URL -d "{\"body\":\"$COMMENT\"}"
