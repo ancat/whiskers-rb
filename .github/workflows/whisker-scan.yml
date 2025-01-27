@@ -12,6 +12,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install semgrep via pip
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep==1.55.0
+
       - name: Create directories
         run: |
           mkdir -p /tmp/old-gemfiles
@@ -50,7 +55,10 @@ jobs:
               /tmp/whiskers gemfile-diff-scan /tmp/diff.json > /tmp/scan_results.txt
               
               if [ -s /tmp/scan_results.txt ]; then
-                gh pr comment ${{ github.event.pull_request.number }} --body "$(echo 'Whiskers scan results for '$(basename "$old")':\n```\n'$(cat /tmp/scan_results.txt)'\n```')"
+                echo -e "Whiskers scan results for "$(basename "$old")":\n\`\`\`" > /tmp/comment.txt
+                cat /tmp/scan_results.txt >> /tmp/comment.txt
+                echo -e "\n\`\`\`" >> /tmp/comment.txt
+                gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.txt
               fi
             fi
           done
