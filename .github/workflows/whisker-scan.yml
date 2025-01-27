@@ -1,0 +1,67 @@
+name: Scan Gemfile Changes
+on:
+  pull_request:
+    paths:
+      - '**/Gemfile.lock'
+
+jobs:
+  scan-gemfiles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install semgrep via pip
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep==1.55.0
+
+      - name: Create directories
+        run: |
+          mkdir -p /tmp/old-gemfiles
+          mkdir -p /tmp/new-gemfiles
+
+      - name: Download whiskers
+        run: |
+          curl -L -o /tmp/whiskers https://github.com/ancat/whiskers/releases/download/v0/whiskers.linux.amd64
+          chmod +x /tmp/whiskers
+
+      - name: Get changed Gemfile.locks
+        id: changed-files
+        run: |
+          echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep 'Gemfile.lock' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Process Gemfile changes
+        run: |
+          for file in ${{ steps.changed-files.outputs.files }}; do
+            dir=$(dirname "$file")
+            base=$(basename "$file")
+            
+            # Get old version from base branch
+            git show ${{ github.event.pull_request.base.sha }}:"$file" > "/tmp/old-gemfiles/${dir//\//_}_$base"
+            
+            # Get new version from current branch
+            cp "$file" "/tmp/new-gemfiles/${dir//\//_}_$base"
+          done
+
+      - name: Scan Gemfile changes
+        run: |
+          for old in /tmp/old-gemfiles/*; do
+            new="/tmp/new-gemfiles/$(basename "$old")"
+            if [ -f "$new" ]; then
+              echo "Scanning changes in $(basename "$old")..."
+              /tmp/whiskers gemfile-diff "$old" "$new" -o /tmp/diff.json
+              /tmp/whiskers gemfile-diff-scan /tmp/diff.json > /tmp/scan_results.txt
+              
+              if [ -s /tmp/scan_results.txt ]; then
+                echo -e "Whiskers scan results for "$(basename "$old")":\n\`\`\`" > /tmp/comment.txt
+                cat /tmp/scan_results.txt >> /tmp/comment.txt
+                echo -e "\n\`\`\`" >> /tmp/comment.txt
+                gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.txt
+              fi
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
